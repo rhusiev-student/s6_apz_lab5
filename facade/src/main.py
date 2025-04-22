@@ -184,7 +184,7 @@ async def get_logs(client: Client = Depends(lambda: app.state.client)):
 
 
 def main():
-    config_url = sys.argv[1] if len(sys.argv) == 2 else "http://localhost:8000"
+    config_url = sys.argv[1] if len(sys.argv) == 2 else "http://127.0.0.1:8000"
     client = Client(config_url)
     app.state.client = client
     uvicorn.run(app, host="0.0.0.0", port=13226)

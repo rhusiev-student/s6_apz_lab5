@@ -75,13 +75,16 @@ def run_fastapi(port: int):
 if __name__ == "__main__":
     logger.info("Starting Kafka consumer application")
     args = sys.argv
-    if len(args) != 4:
-        logger.error(f"Usage: {args[0]} <config_url> <self_ip> <num>")
+    if len(args) == 2:
+        config_url = "http://127.0.0.1:8000"
+        self_ip = "127.0.0.1"
+    elif len(args) == 4:
+        config_url = args[2]
+        self_ip = args[3]
+    else:
+        logger.error(f"Usage: {args[0]} <num> [config_url self_ip]")
         sys.exit(1)
-
-    config_url = args[1]
-    self_ip = args[2]
-    num = args[3]
+    num = args[1]
 
     try:
         num = int(num)
