@@ -284,6 +284,24 @@ files = [
 all = ["flake8 (>=7.1.1)", "mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2)"]
 
 [[package]]
+name = "py-consul"
+version = "1.6.0"
+description = "Python client for Consul (http://www.consul.io/)"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "py_consul-1.6.0-py2.py3-none-any.whl", hash = "sha256:2ffd6b9dd794da99393b75ff78fd786917c3afbfe71ac46292f7099457e68fdf"},
+    {file = "py_consul-1.6.0.tar.gz", hash = "sha256:a5ba8347178b0172aa1388e6584ae34ad0d14e22ae7bc8ee53071c24de5c8712"},
+]
+
+[package.dependencies]
+requests = ">=2.0"
+
+[package.extras]
+asyncio = ["aiohttp"]
+
+[[package]]
 name = "pydantic"
 version = "2.11.2"
 description = "Data validation using Python type hints"
@@ -536,4 +554,4 @@ standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13"
-content-hash = "5e71cbac7e4d9e6adfe1d61e51ab2576ec230a17ef6831a6965a95c7b41a8e0d"
+content-hash = "d8310814eda000c7ec833100b2f1182c74a33e92c785a3b7e452fc0fd3d04d08"

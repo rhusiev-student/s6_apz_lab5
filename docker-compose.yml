@@ -22,6 +22,7 @@ services:
       CLUSTER_ID: 'VeRyKoolC-luste--rHehe'
     networks:
       - kafka-net
+      - consul-net
 
   kafka2:
     image: apache/kafka:latest
@@ -45,6 +46,7 @@ services:
       CLUSTER_ID: 'VeRyKoolC-luste--rHehe'
     networks:
       - kafka-net
+      - consul-net
 
   kafka3:
     image: apache/kafka:latest
@@ -68,7 +70,10 @@ services:
       CLUSTER_ID: 'VeRyKoolC-luste--rHehe'
     networks:
       - kafka-net
+      - consul-net
 
 networks:
   kafka-net:
+    external: true
+  consul-net:
     external: true

@@ -3,6 +3,8 @@ import sys
 import uuid
 import random
 
+from contextlib import asynccontextmanager
+
 from grpc import aio
 import httpx
 import uvicorn
@@ -13,26 +15,20 @@ from grpc_generated import logging_pb2, logging_pb2_grpc
 
 from kafka import produce_message
 
+from consul.aio import Consul
+
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
 MAX_RETRIES = 3
 RETRY_DELAY_MS = 500
-
-
-class Client:
-    def __init__(self, config_url):
-        self.config_url = config_url
-        self._lock = asyncio.Lock()
-        self.http = httpx.AsyncClient()
-
-    async def get_possible_addresses(self, service):
-        async with self._lock:
-            try:
-                resp = await self.http.get(f"{self.config_url}/get_ips/{service}")
-                resp.raise_for_status()
-                ips = resp.json()
-            except Exception as e:
-                print(f"Error while getting addresses: {e}")
-                return []
-        return list(ips.values())
 
 
 async def create_grpc_client(logging_url):
@@ -74,11 +70,53 @@ def retry_decorator(max_retries=MAX_RETRIES, delay_ms=RETRY_DELAY_MS, refresh_fn
     return decorator
 
 
-app = FastAPI()
+class Client:
+    def __init__(
+        self,
+        consul_client: Consul,
+        weird_setup_forced_by_previous_homework: bool = False,
+    ):
+        self.consul_client = consul_client
+        self.weird_setup_forced_by_previous_homework = True
+
+    async def get_possible_addresses(self, service: str) -> list[str]:
+        _, services = await self.consul_client.catalog.service(service)
+        addresses = [
+            f"{service['ServiceAddress']}:{service['ServicePort']}"
+            for service in services
+        ]
+        return addresses
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    consul_client = Consul(host="badger")
+    app.state.client = Client(consul_client, True)
+
+    await consul_client.agent.service.register(
+        name="facade",
+        service_id=f"facade-{num}",
+        port=port,
+        address=f"facade-{num}",
+        tags=["facade"],
+    )
+    kafka_addresses = (await consul_client.kv.get("kafka_addresses"))[1]["Value"]
+    kafka_addresses = kafka_addresses.decode("utf-8")
+    kafka_topic = (await consul_client.kv.get("kafka_topic"))[1]["Value"]
+    kafka_topic = kafka_topic.decode("utf-8")
+
+    app.state.kafka_addresses = kafka_addresses
+    app.state.kafka_topic = kafka_topic
+    yield
+    await consul_client.agent.service.deregister(f"facade-{num}")
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/")
-async def add_log(message: str, client: Client = Depends(lambda: app.state.client)):
+async def add_log(message: str):
+    client = app.state.client
     log_uuid = str(uuid.uuid4())
 
     async def refresh_url(_):
@@ -112,7 +150,11 @@ async def add_log(message: str, client: Client = Depends(lambda: app.state.clien
         )
 
     try:
-        produce_message({"message": message})
+        produce_message(
+            {"message": message},
+            kafka_addresses=app.state.kafka_addresses,
+            topic_name=app.state.kafka_topic,
+        )
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -122,7 +164,8 @@ async def add_log(message: str, client: Client = Depends(lambda: app.state.clien
 
 
 @app.get("/")
-async def get_logs(client: Client = Depends(lambda: app.state.client)):
+async def get_logs():
+    client = app.state.client
     app.state.messages_urls = await client.get_possible_addresses("messages")
     if not app.state.messages_urls:
         raise HTTPException(
@@ -141,6 +184,7 @@ async def get_logs(client: Client = Depends(lambda: app.state.client)):
         current = app.state.current_url_messages
         urls = app.state.messages_urls
         async with httpx.AsyncClient() as ac:
+            logger.info(f"Requesting message from {urls[current]}")
             resp = await ac.get(f"http://{urls[current]}")
             resp.raise_for_status()
             return resp.text
@@ -183,12 +227,20 @@ async def get_logs(client: Client = Depends(lambda: app.state.client)):
         )
 
 
-def main():
-    config_url = sys.argv[1] if len(sys.argv) == 2 else "http://127.0.0.1:8000"
-    client = Client(config_url)
-    app.state.client = client
-    uvicorn.run(app, host="0.0.0.0", port=13226)
+def main(port: int):
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 2:
+        print("Usage: python main.py <number>")
+        sys.exit(1)
+    try:
+        num = int(sys.argv[1])
+    except ValueError:
+        print("Usage: python main.py <number>")
+        sys.exit(1)
+
+    port = 14229 + num
+
+    main(port)

@@ -1,13 +1,13 @@
 import asyncio
 import sys
 import logging
-import requests
 from kafka import KafkaConsumerError, consume_messages
 from fastapi import FastAPI
 import uvicorn
 from threading import Thread
 from collections import OrderedDict
 from threading import Lock
+import consul
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,8 +45,14 @@ async def get_messages():
     return {"messages": message_store.get_all()}
 
 
-async def kafka_consumer():
-    consumer_gen = consume_messages(topic_name="my-kool-topic")
+async def kafka_consumer(
+    kafka_addresses: str, kafka_topic: str, kafka_consumer_group: str
+):
+    consumer_gen = consume_messages(
+        topic_name=kafka_topic,
+        group_id=kafka_consumer_group,
+        kafka_addresses=kafka_addresses,
+    )
     try:
         message_counter = 0
         for message in consumer_gen:
@@ -75,14 +81,8 @@ def run_fastapi(port: int):
 if __name__ == "__main__":
     logger.info("Starting Kafka consumer application")
     args = sys.argv
-    if len(args) == 2:
-        config_url = "http://127.0.0.1:8000"
-        self_ip = "127.0.0.1"
-    elif len(args) == 4:
-        config_url = args[2]
-        self_ip = args[3]
-    else:
-        logger.error(f"Usage: {args[0]} <num> [config_url self_ip]")
+    if len(args) != 2:
+        logger.error(f"Usage: {args[0]} <num>")
         sys.exit(1)
     num = args[1]
 
@@ -91,31 +91,33 @@ if __name__ == "__main__":
     except ValueError:
         logger.error(f"Invalid number: {num}")
         sys.exit(1)
-
-    logger.info(
-        f"Starting Kafka consumer with config URL: {config_url}, self IP: {self_ip}"
-    )
-
     port = 12227 + num
-    data = {"port": str(port), "ip": self_ip}
-    try:
-        logger.debug(f"Notifying config service at {config_url}/set_ip/messages/0")
-        response = requests.post(f"{config_url}/set_ip/messages/{num}", json=data)
 
-        if not response.ok:
-            logger.error(
-                f"Error notifying config service: {response.status_code} - {response.text}"
-            )
-            exit(1)
-        logger.info("Successfully notified config service")
-    except Exception as e:
-        logger.exception(f"Error notifying config service: {e}")
-        exit(1)
+    logger.info("Registering service in Consul")
+
+    consul_client = consul.Consul(host="badger")
+    consul_client.agent.service.register(
+        name="messages",
+        service_id=f"messages-{num}",
+        port=port,
+        address=f"messages-{num}",
+        tags=["messages"],
+    )
+    kafka_addresses: str = consul_client.kv.get("kafka_addresses")[1]["Value"]
+    kafka_addresses = kafka_addresses.decode("utf-8")
+    kafka_topic: str = consul_client.kv.get("kafka_topic")[1]["Value"]
+    kafka_topic = kafka_topic.decode("utf-8")
+    kafka_consumer_group: str = consul_client.kv.get("kafka_consumer_group")[1]["Value"]
+    kafka_consumer_group = kafka_consumer_group.decode("utf-8")
+
+    logger.info("Registered service in Consul")
+
+    logger.info("Starting Kafka consumer")
 
     api_thread = Thread(target=run_fastapi, args=(port,), daemon=True)
     api_thread.start()
 
     while True:
         logger.info("Starting to consume messages from Kafka topic 'my-kool-topic'")
-        asyncio.run(kafka_consumer())
+        asyncio.run(kafka_consumer(kafka_addresses, kafka_topic, kafka_consumer_group))
         logger.warning("Main function completed, restarting...")

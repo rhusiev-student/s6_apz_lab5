@@ -12,10 +12,10 @@ def delivery_report(err, msg):
         )
 
 
-def produce_message(message, topic_name="my-kool-topic"):
+def produce_message(message, kafka_addresses: str, topic_name):
     """Send a message to the Kafka topic."""
     conf = {
-        "bootstrap.servers": "localhost:19092,localhost:19094,localhost:19095",
+        "bootstrap.servers": kafka_addresses,
         "acks": "all",
     }
 
@@ -29,7 +29,3 @@ def produce_message(message, topic_name="my-kool-topic"):
     )
 
     producer.flush()
-
-
-if __name__ == "__main__":
-    produce_message({"key": "my-kool-test-value", "timestamp": "1337-42-69"})

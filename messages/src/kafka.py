@@ -25,7 +25,10 @@ class KafkaConsumerError(Exception):
 
 
 def consume_messages(
-    topic_name="my-kool-topic", group_id="my-kool-consumer-group", timeout=1.0
+    topic_name="my-kool-topic",
+    group_id="my-kool-consumer-group",
+    timeout=1.0,
+    kafka_addresses: str = "localhost:19092,localhost:19094,localhost:19095",
 ) -> Generator[dict[str, Any] | KafkaConsumerError | None, None, None]:
     """
     Generator function that yields messages from the Kafka topic or errors.
@@ -39,7 +42,7 @@ def consume_messages(
         Dict containing message data or KafkaConsumerError
     """
     conf = {
-        "bootstrap.servers": "localhost:19092,localhost:19094,localhost:19095",
+        "bootstrap.servers": kafka_addresses,
         "group.id": group_id,
         "auto.offset.reset": "earliest",
     }
