@@ -16,6 +16,7 @@ from grpc_generated import logging_pb2, logging_pb2_grpc
 from kafka import produce_message
 
 from consul.aio import Consul
+from consul import Check
 
 import logging
 
@@ -99,6 +100,11 @@ async def lifespan(app: FastAPI):
         port=port,
         address=f"facade-{num}",
         tags=["facade"],
+        check=Check.http(
+            f"http://facade-{num}:{port}/health",
+            timeout="2s",
+            interval="5s",
+        ),
     )
     kafka_addresses = (await consul_client.kv.get("kafka_addresses"))[1]["Value"]
     kafka_addresses = kafka_addresses.decode("utf-8")
@@ -225,6 +231,11 @@ async def get_logs():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 def main(port: int):

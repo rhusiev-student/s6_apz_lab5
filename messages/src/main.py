@@ -45,6 +45,11 @@ async def get_messages():
     return {"messages": message_store.get_all()}
 
 
+@app.get("/health")
+async def get_health():
+    return {"status": "ok"}
+
+
 async def kafka_consumer(
     kafka_addresses: str, kafka_topic: str, kafka_consumer_group: str
 ):
@@ -70,6 +75,7 @@ async def kafka_consumer(
                 message_counter += 1
     except KeyboardInterrupt:
         logger.info("Consumer stopped by user")
+        raise
     except Exception as e:
         logger.exception(f"Unexpected error in main consumer loop: {e}")
 
@@ -102,6 +108,11 @@ if __name__ == "__main__":
         port=port,
         address=f"messages-{num}",
         tags=["messages"],
+        check=consul.Check.http(
+            f"http://messages-{num}:{port}/health",
+            timeout="2s",
+            interval="5s",
+        ),
     )
     kafka_addresses: str = consul_client.kv.get("kafka_addresses")[1]["Value"]
     kafka_addresses = kafka_addresses.decode("utf-8")
@@ -117,7 +128,12 @@ if __name__ == "__main__":
     api_thread = Thread(target=run_fastapi, args=(port,), daemon=True)
     api_thread.start()
 
-    while True:
-        logger.info("Starting to consume messages from Kafka topic 'my-kool-topic'")
-        asyncio.run(kafka_consumer(kafka_addresses, kafka_topic, kafka_consumer_group))
-        logger.warning("Main function completed, restarting...")
+    try:
+        while True:
+            logger.info("Starting to consume messages from Kafka topic 'my-kool-topic'")
+            asyncio.run(kafka_consumer(kafka_addresses, kafka_topic, kafka_consumer_group))
+            logger.warning("Main function completed, restarting...")
+    finally:
+        logger.info("Main function stopped by user. Deregistering service")
+        consul_client.agent.service.deregister(f"messages-{num}")
+        logger.info("Service deregistered")

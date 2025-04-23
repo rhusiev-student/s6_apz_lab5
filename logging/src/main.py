@@ -6,6 +6,8 @@ import argparse
 
 from grpc import aio
 from grpc_generated import logging_pb2_grpc
+from grpc_health.v1 import health_pb2
+from grpc_health.v1 import health_pb2_grpc
 from log import Logger
 
 import consul
@@ -14,6 +16,17 @@ logging.basicConfig()
 logging.getLogger("hazelcast").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+class HealthServicer(health_pb2_grpc.HealthServicer):
+    async def Check(self, request, context):
+        return health_pb2.HealthCheckResponse(
+            status=health_pb2.HealthCheckResponse.SERVING
+        )
+    
+    async def Watch(self, request, context):
+        yield health_pb2.HealthCheckResponse(
+            status=health_pb2.HealthCheckResponse.SERVING
+        )
 
 
 async def serve(hazelcaster: Hazelcaster, port: int):
@@ -26,6 +39,7 @@ async def serve(hazelcaster: Hazelcaster, port: int):
         logging_pb2_grpc.add_LoggingServiceServicer_to_server(
             Logger(hazelcaster, logger), srv
         )
+        health_pb2_grpc.add_HealthServicer_to_server(HealthServicer(), srv)
 
         listen_address = f"0.0.0.0:{port}"
         srv.add_insecure_port(listen_address)
@@ -49,6 +63,10 @@ if __name__ == "__main__":
         port=port,
         address=f"logging-{num}",
         tags=["logging"],
+        check={
+            "grpc": f"logging-{num}:{port}",
+            "interval": "10s",
+        }
     )
     logger.info("Registered logging service in consul")
     hazelcast_ip = consul_client.kv.get("hazelcast_ip")[1]["Value"]
@@ -57,4 +75,9 @@ if __name__ == "__main__":
 
     logger.info("Starting hazelcast logging server")
     hazelcaster = Hazelcaster("logging", num, hz_ip=hazelcast_ip)
-    asyncio.run(serve(hazelcaster, port))
+    try:
+        asyncio.run(serve(hazelcaster, port))
+    finally:
+        logger.info("Main function stopped. Deregistering service")
+        consul_client.agent.service.deregister(f"logging-{num}")
+        logger.info("Service deregistered")
